@@ -1,0 +1,6 @@
+{
+  "name": "Manipulation Detector",
+  "description": "Ein evidenzbasierter Kommunikationsanalysator, der Text, Chat- oder Besprechungstranskripte auf manipulative Muster untersucht, ohne Personen zu katalogisieren oder zu pathologisieren.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
