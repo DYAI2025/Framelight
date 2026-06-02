@@ -80,8 +80,8 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: "ben.poersch@gmail.com",
-          name: "Ben Pörsch",
+          email: "analyst@wordthreat-reference.local",
+          name: "Standard Analyst",
           provider: "google"
         })
       });

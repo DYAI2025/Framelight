@@ -9,6 +9,8 @@ import CollaborativeSession from "./components/CollaborativeSession";
 import AuthModal from "./components/AuthModal";
 import { SAMPLE_TEXT, SAMPLE_ANALYSIS, INSTANT_SAMPLE_CASES } from "./lib/sampleData";
 import { AnalysisOutput, HistoryItem, Finding } from "./lib/types";
+import { wordthreatClient } from "./lib/api/wordthreatClient";
+import { mapWordthreatResponseToAnalysisOutput } from "./lib/api/mappers";
 import { 
   ShieldAlert, 
   Sparkles, 
@@ -426,31 +428,13 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text,
-          mode,
-          evidenceReport,
-          mediaType: activeMediaType,
-        }),
+      const response = await wordthreatClient.analyzeText(text, {
+        mode,
+        evidence_report: evidenceReport,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        // Handle specific server-side errors (e.g., missing API keys)
-        if (data.isConfigError) {
-          throw { isConfig: true, message: data.message };
-        }
-        throw new Error(data.error || "Unerwarteter Fehler im Analyse-Backend.");
-      }
-
-      // Successful analysis completion!
-      const finalOutput: AnalysisOutput = data;
+      // Map standard Wordthreat Response to current view model output layout
+      const finalOutput: AnalysisOutput = mapWordthreatResponseToAnalysisOutput(response);
       setOutput(finalOutput);
 
       // If active WebSocket collaboration exists, broadcast the completed analysis so other browsers sync live
@@ -493,16 +477,14 @@ export default function App() {
 
     } catch (err: any) {
       console.error("API error:", err);
-      if (err.isConfig) {
-        setApiError({
-          message: err.message,
-          isConfigError: true,
-        });
-      } else {
-        setApiError({
-          message: err.message || "Der Server konnte nicht erreicht werden. Stellen Sie sicher, dass Ihre Internetverbindung besteht.",
-        });
-      }
+      const isAuthKind = err && typeof err === "object" && err.kind === "auth";
+      const errMsg = err && typeof err === "object" && err.message 
+        ? err.message 
+        : "Der Server konnte nicht erreicht werden. Stellen Sie sicher, dass Ihre Internetverbindung besteht.";
+      setApiError({
+        message: errMsg,
+        isConfigError: isAuthKind,
+      });
     } finally {
       setIsLoading(false);
     }
