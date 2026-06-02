@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { computeFindingIntensity, computeOverallScores } from "./src/lib/scoring.ts";
 import { AnalysisOutput, Finding, RiskLevel, ConfidenceLevel } from "./src/lib/types.ts";
+import { WebSocketServer, WebSocket } from "ws";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -53,6 +54,22 @@ const PORT = 3000;
 
 // Enable JSON middleware with a generous body limit for large transcripts
 app.use(express.json({ limit: "5mb" }));
+
+// In-Memory map of active collaborative rooms for multi-user sync
+interface RoomState {
+  id: string;
+  text: string;
+  mode: "quick" | "deep";
+  evidenceReport: boolean;
+  output: any | null;
+  liveTags: any[];
+  chats: any[];
+}
+const roomsState = new Map<string, RoomState>();
+
+// Store WebSocket client connections by room
+const roomConnections = new Map<string, Set<{ ws: WebSocket; userId: string; name: string; email: string; color: string }>>();
+
 
 // API: Auth Signup
 app.post("/api/auth/signup", (req, res) => {
@@ -215,13 +232,13 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date().toISOString() });
 });
 
-// API: Analyze Text endpoint
+// API: Analyze Text / Audio / Video endpoint
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { text, mode, evidenceReport } = req.body;
+    const { text, mode, evidenceReport, mediaType, mediaUrl } = req.body;
 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
-      return res.status(400).json({ error: "Bitte geben Sie einen Text ein, der analysiert werden soll." });
+      return res.status(400).json({ error: "Bitte geben Sie einen Text oder ein Transkript ein, das analysiert werden soll." });
     }
 
     // Verify if API key is present
@@ -234,6 +251,24 @@ app.post("/api/analyze", async (req, res) => {
     }
 
     const ai = getGenAI();
+
+    // Custom instructions based on active media modality
+    let mediaSpecificInstructions = "";
+    if (mediaType === "audio") {
+      mediaSpecificInstructions = `
+ANALYSESPEZIFISCHER FOKUS AUF AUDIO-SIGNALE:
+Da es sich um eine AUDIO-Aufnahme handelt, bewerte zusätzlich akustische Indikatoren:
+1. Vokale Stressmuster: Weise in den Befunden (finding.evidence & finding.whyFlagged) auf Stimmfrequenzschwankungen, Zögern, schnelles Sprechen oder verdächtige Pausen hin.
+2. Füge in 'evidence' mindestens ein stimmliches Merkmal ein (z.B. "Erhöhter Stimm-Pitch bei Abwehrreaktion", "Gehetztes Sprechtempo bei Rechtfertigung").
+3. Kennzeichne im 'whyFlagged' die akustischen Belastungsmomente.`;
+    } else if (mediaType === "video") {
+      mediaSpecificInstructions = `
+ANALYSESPEZIFISCHER FOKUS AUF VIDEO/MULTIMODAL-SIGNALE:
+Da es sich um ein VIDEO-Dokument handelt, analysiere integriert verbale, vokale und non-verbale Signale:
+1. Mikroexpressionen und Gestik: Achte auf Defensivhaltungen (z.B. verschränkte Arme, wegschauen, schnelles Blinzeln) oder Diskrepanzen zwischen Wortlaut und Mimik.
+2. Integriere diese körperlichen Merkmale direkt in die 'evidence' (z.B. "Abgewandter Blickkontakt", "Defensive Armbarriere", "Mikro-Muskelanspannung der Stirn").
+3. Bewerte visuelle Verhaltenszüge und ordne sie chronologisch ein.`;
+    }
 
     // Prepare system instructions and prompt
     const scanDepthText = mode === "deep" 
@@ -258,9 +293,10 @@ WICHTIGE DIKTATE:
 7. Gib die Ergebnisse im exakten JSON-Format zurück, das nachfolgend beschrieben ist.
 
 ${scanDepthText}
+${mediaSpecificInstructions}
 Liefere das Ergebnis AUSSCHLIESSLICH als valides JSON entsprechend dem Schema. Keine Markdown-Formatierungen außerhalb des JSONs!`;
 
-    const prompt = `Analysiere folgenden Text auf manipulative Kommunikationsmuster:
+    const prompt = `Analysiere folgenden Text auf manipulative Kommunikationsmuster (Modus: ${mediaType || "text"}):
 
 --- BEGINN DES TEXTES ---
 ${text}
@@ -310,8 +346,8 @@ Gib das Ergebnis als valides JSON-Objekt mit folgender Struktur zurück:
       "baseIntensity": 1 bis 5, // Erste Einschätzung auf einer Skala von 1 (sehr mild/subtil) bis 5 (massiv/bedrohlich)
       "confidence": "low" | "medium" | "high",
       "confidenceScore": 1 bis 100,
-      "evidence": ["Beleg-Symptom 1", "Beleg-Symptom 2"],
-      "whyFlagged": "Kommunikationstheoretische Erklärung, warum dies auffällt",
+      "evidence": ["Beleg-Symptom 1", "Beleg-Symptom 2"], // Integriere hier bei Audio/Video relevante vokale, lautliche oder mimische Stressmerkmale falls zutreffend!
+      "whyFlagged": "Kommunikationstheoretische Erklärung, warum dies auffällt. Erwähne akustische/visuelle Faktoren bei Audio/Video.",
       "negativeReading": "Kritische Deutung des Musters (negative Lesart)",
       "benignReading": "Möglichst wohlwollende, alternative Deutung (z.B. Unsicherheit, Überlastung, ungeschickter Selbstausdruck)",
       "possibleFunction": "Welche Wirkung oder Funktion erfüllt diese Taktik im Gespräch?",
@@ -440,9 +476,186 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);
   });
+
+  // Attach WebSocketServer to the express server instance
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
+
+  wss.on("connection", (ws: WebSocket) => {
+    let currentRoomId = "";
+    let clientSession: { ws: WebSocket; userId: string; name: string; email: string; color: string } | null = null;
+
+    ws.on("message", (messageStr: string) => {
+      try {
+        const msg = JSON.parse(messageStr);
+
+        if (msg.type === "join") {
+          const { roomId, userId, name, email } = msg;
+          currentRoomId = roomId;
+
+          // Assign a nice custom avatar background color for visual presence identification
+          const colors = ["bg-blue-500", "bg-purple-500", "bg-emerald-500", "bg-amber-500", "bg-indigo-500", "bg-pink-500", "bg-rose-500"];
+          const userColor = colors[Math.abs(userId.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)) % colors.length];
+
+          clientSession = { ws, userId, name: name || "Anonymer Bearbeiter", email: email || "gast@analyselab.de", color: userColor };
+
+          if (!roomConnections.has(roomId)) {
+            roomConnections.set(roomId, new Set());
+          }
+          roomConnections.get(roomId)!.add(clientSession);
+
+          // Retrieve or initialize the room's cached active collaboration state
+          if (!roomsState.has(roomId)) {
+            roomsState.set(roomId, {
+              id: roomId,
+              text: "",
+              mode: "quick",
+              evidenceReport: true,
+              output: null,
+              liveTags: [],
+              chats: []
+            });
+          }
+          const roomState = roomsState.get(roomId)!;
+
+          // Send current sync state back to the newly connected user
+          ws.send(JSON.stringify({
+            type: "sync",
+            text: roomState.text,
+            mode: roomState.mode,
+            evidenceReport: roomState.evidenceReport,
+            output: roomState.output,
+            liveTags: roomState.liveTags,
+            chats: roomState.chats
+          }));
+
+          // Broadcast the newly updated online user list to all connections in this room
+          broadcastPresence(roomId);
+        }
+
+        else if (msg.type === "text-update") {
+          const { roomId, text, mode, evidenceReport } = msg;
+          if (roomsState.has(roomId)) {
+            const state = roomsState.get(roomId)!;
+            state.text = text;
+            state.mode = mode ?? state.mode;
+            state.evidenceReport = evidenceReport ?? state.evidenceReport;
+          }
+
+          // Broadcast the updated inputs to everyone *else* in the room
+          broadcastToRoom(roomId, ws, {
+            type: "text-sync",
+            text,
+            mode,
+            evidenceReport
+          });
+        }
+
+        else if (msg.type === "analysis-update") {
+          const { roomId, output } = msg;
+          if (roomsState.has(roomId)) {
+            roomsState.get(roomId)!.output = output;
+          }
+          // Broadcast new active analysis result so all teammate components refresh
+          broadcastToRoom(roomId, null, {
+            type: "analysis-sync",
+            output
+          });
+        }
+
+        else if (msg.type === "add-live-tag") {
+          const { roomId, tag } = msg;
+          if (roomsState.has(roomId)) {
+            const state = roomsState.get(roomId)!;
+            // Prevent duplicates
+            if (!state.liveTags.some(t => t.id === tag.id)) {
+              state.liveTags.push(tag);
+            }
+          }
+          broadcastToRoom(roomId, null, {
+            type: "live-tag-sync",
+            tag
+          });
+        }
+
+        else if (msg.type === "add-chat") {
+          const { roomId, chat } = msg;
+          if (roomsState.has(roomId)) {
+            roomsState.get(roomId)!.chats.push(chat);
+          }
+          broadcastToRoom(roomId, null, {
+            type: "chat-sync",
+            chat
+          });
+        }
+
+        else if (msg.type === "heartbeat") {
+          ws.send(JSON.stringify({ type: "heartbeat-reply" }));
+        }
+
+      } catch (err) {
+        console.error("WSS message handle error:", err);
+      }
+    });
+
+    ws.on("close", () => {
+      if (currentRoomId && clientSession) {
+        const conns = roomConnections.get(currentRoomId);
+        if (conns) {
+          conns.delete(clientSession);
+          if (conns.size === 0) {
+            roomConnections.delete(currentRoomId);
+          }
+        }
+        broadcastPresence(currentRoomId);
+      }
+    });
+  });
+
+  // Helper inside startServer to broadcast presence user lists
+  function broadcastPresence(roomId: string) {
+    const clients = roomConnections.get(roomId);
+    if (!clients) return;
+
+    const userList = Array.from(clients).map(c => ({
+      id: c.userId,
+      name: c.name,
+      email: c.email,
+      color: c.color
+    }));
+
+    const payload = JSON.stringify({
+      type: "presence",
+      users: userList
+    });
+
+    for (const c of clients) {
+      if (c.ws.readyState === WebSocket.OPEN) {
+        c.ws.send(payload);
+      }
+    }
+  }
+
+  // Helper inside startServer to broadcast normal updates to room connections
+  function broadcastToRoom(roomId: string, excludeWs: WebSocket | null, payloadObj: any) {
+    const clients = roomConnections.get(roomId);
+    if (!clients) return;
+
+    const payload = JSON.stringify(payloadObj);
+    for (const c of clients) {
+      if (c.ws !== excludeWs && c.ws.readyState === WebSocket.OPEN) {
+        c.ws.send(payload);
+      }
+    }
+  }
 }
 
 // Global scoreToRiskHelper
