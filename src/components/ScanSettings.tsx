@@ -1,26 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { 
   Sliders, 
-  Settings, 
   Play, 
   RefreshCw, 
   FileText, 
   FileAudio, 
   FileVideo, 
   Sparkles, 
-  HelpCircle, 
-  AlertCircle,
-  Mic,
-  MicOff,
-  Video,
-  Volume2,
-  Gauge,
-  Upload,
-  Check,
-  Radio,
-  Tv
+  AlertCircle
 } from "lucide-react";
-import { SAMPLE_TEXT } from "../lib/sampleData";
 import { HistoryItem } from "../lib/types";
 
 interface ScanSettingsProps {
@@ -56,149 +44,6 @@ export default function ScanSettings({
   activeMediaType,
   setActiveMediaType,
 }: ScanSettingsProps) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingText, setRecordingText] = useState("");
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-  const [activeAudioSource, setActiveAudioSource] = useState<"upload" | "dictate" | "sample">("sample");
-
-  // Telemetry indicators for video scanning
-  const [isPlayingVideo, setIsPlayingVideo] = useState(false);
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [facialStress, setFacialStress] = useState(15);
-  const [vocalJitter, setVocalJitter] = useState(25);
-  const [postureDefense, setPostureDefense] = useState(10);
-  const [videoLink, setVideoLink] = useState("");
-  const [activeTelemetryStatus, setActiveTelemetryStatus] = useState("Inaktiv - Bereit für Scan-Sequenz");
-
-  // Speech to Text trigger (Web Speech API)
-  const startSpeechToText = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Sprachaufgabe im Browser nicht unterstützt. Verwende die Audio-Demoszenarien für eine voll funktionsfähige STT-Demonstration.");
-      loadAudioSample("Szenario A");
-      return;
-    }
-
-    const rec = new SpeechRecognition();
-    rec.lang = "de-DE";
-    rec.continuous = true;
-    rec.interimResults = true;
-
-    rec.onstart = () => {
-      setIsRecording(true);
-      setRecordingText("Höre zu... fangen Sie an zu sprechen.");
-    };
-
-    rec.onresult = (e: any) => {
-      let finalTranscript = "";
-      for (let i = e.resultIndex; i < e.results.length; ++i) {
-        if (e.results[i].isFinal) {
-          finalTranscript += e.results[i][0].transcript;
-        }
-      }
-      if (finalTranscript) {
-        setRecordingText(finalTranscript);
-        setText((text ? text + "\n" : "") + "Sprecher A: " + finalTranscript.trim());
-      }
-    };
-
-    rec.onerror = (evt: any) => {
-      console.error("STT error", evt);
-      setIsRecording(false);
-    };
-
-    rec.onend = () => {
-      setIsRecording(false);
-    };
-
-    try {
-      rec.start();
-    } catch (err) {
-      setIsRecording(false);
-    }
-  };
-
-  // Simulating an Audio scenario transcription (Speech-to-text separation)
-  const loadAudioSample = (scenarioName: string) => {
-    setIsProcessingAudio(true);
-    setRecordingText("Lese Audio-Datei ein...");
-    
-    setTimeout(() => {
-      setRecordingText("Speech-To-Text Engine initialisiert...");
-      
-      setTimeout(() => {
-        setRecordingText("Transkribiere Segmente mit biometrischen Sprechersignaturen...");
-        
-        setTimeout(() => {
-          let transcript = "";
-          if (scenarioName === "Szenario A") {
-            transcript = `A: Sie haben die Deadline für das Projekt wieder verpasst. Das ist sehr unprofessionell.
-B: Es tut mir leid, das war keine Absicht, wir hatten massive Serverausfälle.
-A: Sie finden immer Ausreden. Wenn Sie das Projekt nicht schätzen, sagen Sie es einfach klar.
-B: Nein, das stimmt nicht! Ich schätze meine Arbeit sehr wohl. Aber ohne Server kann ich nicht zaubern.
-A: Ich verlange einfach nur grundlegende Professionalität, aber vielleicht ist das zu viel verlangt.`;
-          } else {
-            transcript = `Kunde: Ich bin absolut unzufrieden mit Ihrem Service. Der Fehler liegt ganz klar bei Ihrer Software!
-Support: Ich verstehe Ihren Ärger. Lassen Sie uns die Logdaten gemeinsam prüfen, um die Ursache zu ermitteln.
-Kunde: Wenn Sie kompetent wären, bräuchten wir keine Logs prüfen. Tun Sie einfach Ihren Job!
-Support: Ich bemühe mich um eine schnelle Lösung. Wir können das Problem sofort beheben, wenn wir den Fehlercode auslesen.
-Kunde: Sie versuchen nur, sich aus der Verantwortung zu ziehen!`;
-          }
-          setText(transcript);
-          setIsProcessingAudio(false);
-          setRecordingText(`Transkription abgeschlossen! ${transcript.split("\n").length} Segmente importiert.`);
-        }, 1200);
-      }, 1000);
-    }, 800);
-  };
-
-  // Video scanner telemetry ticker
-  useEffect(() => {
-    let timer: any;
-    if (isPlayingVideo) {
-      timer = setInterval(() => {
-        setVideoProgress(prev => {
-          if (prev >= 100) {
-            setIsPlayingVideo(false);
-            setActiveTelemetryStatus("Analyse abgeschlossen - Bereit zur Text-Auswertung");
-            return 0;
-          }
-          
-          // Mimic non-verbal metrics shifting dynamically based on playback timestamp
-          const nextVal = prev + 4;
-          
-          if (nextVal > 15 && nextVal < 40) {
-            setFacialStress(prevF => Math.min(prevF + 5, 78));
-            setVocalJitter(prevV => Math.min(prevV + 8, 85));
-            setPostureDefense(prevP => Math.min(prevP + 3, 50));
-            setActiveTelemetryStatus("Warnung: Stimmfrequenz-Ausfälligkeit (Pitch-Anstieg) @ S2");
-          } else if (nextVal > 55 && nextVal < 80) {
-            setFacialStress(prevF => Math.max(prevF - 4, 30));
-            setVocalJitter(prevV => Math.max(prevV - 6, 20));
-            setPostureDefense(prevP => Math.min(prevP + 8, 82));
-            setActiveTelemetryStatus("Gaze-avoidance (Blickkontakt-Bruch) & Armverschleierung detektiert @ S4");
-          } else {
-            setFacialStress(prevF => Math.max(prevF - 3, 20));
-            setVocalJitter(prevV => Math.max(prevV - 4, 15));
-            setPostureDefense(prevP => Math.max(prevP - 5, 25));
-            setActiveTelemetryStatus("Linguistische & visuelle Sequenz-Synchronisation aktiv...");
-          }
-
-          if (prev === 0) {
-            // Seed a smart sample text representing the dialog being analyzed
-            setText(`Sprecher A: Sie müssen mir jetzt gar nicht erst so kommen. Ich habe das Formular ordnungsgemäß weggeschickt.
-Sprecher B: Das mag sein, aber bei uns ist nichts im System verbucht. Sind Sie ganz sicher?
-Sprecher A: Wollen Sie mir unterstellen, dass ich lüge? Das ist eine absolute Frechheit!
-Sprecher B: Nein, überhaupt nicht. Ich wollte nur die Sendebestätigung abgleichen.
-Sprecher A: Wenn Ihre Abteilung überfordert ist, schieben Sie nicht mir die Schuld in die Schuhe.`);
-          }
-
-          return nextVal;
-        });
-      }, 500);
-    }
-    return () => clearInterval(timer);
-  }, [isPlayingVideo]);
 
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
   const charCount = text.length;
@@ -234,8 +79,8 @@ Sprecher A: Wenn Ihre Abteilung überfordert ist, schieben Sie nicht mir die Sch
               className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold text-[#1D2433]/30 cursor-not-allowed transition-all"
             >
               <FileAudio className="w-3.5 h-3.5 opacity-40" />
-              <span className="line-through">Audio</span>
-              <span className="text-[7px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded">v2</span>
+              <span className="line-through">Audio (Coming Soon)</span>
+              <span className="text-[7px] bg-[#E4E8F0] text-gray-500 px-1 py-0.5 rounded font-bold">v2</span>
             </button>
             <button
               type="button"
@@ -244,30 +89,11 @@ Sprecher A: Wenn Ihre Abteilung überfordert ist, schieben Sie nicht mir die Sch
               className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold text-[#1D2433]/30 cursor-not-allowed transition-all"
             >
               <FileVideo className="w-3.5 h-3.5 opacity-40" />
-              <span className="line-through">Video</span>
-              <span className="text-[7px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded">v2</span>
+              <span className="line-through">Video (Coming Soon)</span>
+              <span className="text-[7px] bg-[#E4E8F0] text-gray-500 px-1 py-0.5 rounded font-bold">v2</span>
             </button>
           </div>
         </div>
-
-        {/* Dynamic Modality Controls Area */}
-        {activeMediaType === "audio" && (
-          <div className="mb-4 p-4 border border-violet-100 bg-violet-50/20 rounded-xl text-center space-y-1">
-            <span className="text-[10px] font-bold text-violet-700 uppercase tracking-widest flex items-center justify-center gap-1">
-              <Volume2 className="w-3.5 h-3.5" /> Speech-To-Text & Audio-Scan (Coming Soon)
-            </span>
-            <p className="text-[10px] text-gray-500">Audio-Analysen, Tonhöhen-Prosodien und Diktier-Scans sind für die standardisierte wordthreat_API v1 text-only dekonstruiert.</p>
-          </div>
-        )}
-
-        {activeMediaType === "video" && (
-          <div className="mb-4 p-4 border border-rose-100 bg-rose-50/20 rounded-xl text-center space-y-1">
-            <span className="text-[10px] font-bold text-rose-600 uppercase tracking-widest flex items-center justify-center gap-1">
-              <Tv className="w-3.5 h-3.5" /> Video-Uploader & Verhaltenssensorik (Coming Soon)
-            </span>
-            <p className="text-[10px] text-gray-500">MIMIK-STRESS, VOICE-JITTER und verhaltenstypologische Biomarker-Flüsse sind im v1 Text-Fokus standardmäßig deaktiviert.</p>
-          </div>
-        )}
 
         {/* Text Area Input */}
         <div className="space-y-2.5 mb-4">
